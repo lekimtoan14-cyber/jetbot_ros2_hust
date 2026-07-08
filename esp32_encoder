@@ -1,0 +1,71 @@
+#include <Arduino.h>
+
+// =====================================================================
+// ⚙️ 1. ĐỊNH NGHĨA CHÂN PHẦN CỨNG ENCODER 
+// =====================================================================
+const int ENCODER_LEFT_A = 18;  
+const int ENCODER_LEFT_B = 19;  
+const int ENCODER_RIGHT_A = 22; 
+const int ENCODER_RIGHT_B = 23; 
+
+// Hai biến tổng tích lũy toàn cục dạng số nguyên dài
+volatile long total_left = 0;
+volatile long total_right = 0;
+
+// =====================================================================
+// ⚡ 2. CÁC HÀM NGẮT 4X TỐC ĐỘ CAO 
+// =====================================================================
+void IRAM_ATTR quadEncoderALeftISR() {
+  byte enc_a = digitalRead(ENCODER_LEFT_A); byte enc_b = digitalRead(ENCODER_LEFT_B);
+  if (enc_a != enc_b) total_left--; else total_left++;
+}
+void IRAM_ATTR quadEncoderBLeftISR() {
+  byte enc_a = digitalRead(ENCODER_LEFT_A); byte enc_b = digitalRead(ENCODER_LEFT_B);
+  if (enc_a == enc_b) total_left--; else total_left++;
+}
+void IRAM_ATTR quadEncoderARightISR() {
+  byte enc_a = digitalRead(ENCODER_RIGHT_A); byte enc_b = digitalRead(ENCODER_RIGHT_B);
+  if (enc_a != enc_b) total_right++; else total_right--;
+}
+void IRAM_ATTR quadEncoderBRightISR() {
+  byte enc_a = digitalRead(ENCODER_RIGHT_A); byte enc_b = digitalRead(ENCODER_RIGHT_B);
+  if (enc_a == enc_b) total_right++; else total_right--;
+}
+
+// =====================================================================
+// 🛠️ 3. KHỞI TẠO CẤU HÌNH HỆ THỐNG
+// =====================================================================
+void setup() {
+  // Mở Serial tốc độ cao 115200 baud
+  Serial.begin(115200);
+  
+  pinMode(ENCODER_LEFT_A, INPUT_PULLUP); pinMode(ENCODER_LEFT_B, INPUT_PULLUP);
+  pinMode(ENCODER_RIGHT_A, INPUT_PULLUP); pinMode(ENCODER_RIGHT_B, INPUT_PULLUP);
+  
+  // Đóng đinh chế độ ngắt CHANGE trên cả 4 chân để đạt độ phân giải tối đa 4X
+  attachInterrupt(digitalPinToInterrupt(ENCODER_LEFT_A), quadEncoderALeftISR, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(ENCODER_LEFT_B), quadEncoderBLeftISR, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(ENCODER_RIGHT_A), quadEncoderARightISR, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(ENCODER_RIGHT_B), quadEncoderBRightISR, CHANGE);
+}
+
+// =====================================================================
+// 🔄 4. VÒNG LẶP GỬI DỮ LIỆU ĐỊNH THÌ ỔN ĐỊNH CAO
+// =====================================================================
+void loop() {
+  static unsigned long last_send = 0;
+  
+  // Đảm bảo chu kỳ phát cứng đúng 20ms (50Hz) không trôi thời gian
+  if (millis() - last_send >= 20) {
+    last_send += 20; // Sửa theo thầy: Triệt tiêu Time Drift tích lũy
+    
+    // 🔒 Đóng băng ngắt tạm thời để copy giá trị nguyên vẹn, chống lệch bit (Atomicity)
+    noInterrupts();
+    long current_left = total_left;
+    long current_right = total_right;
+    interrupts(); // Mở lại ngắt ngay lập tức
+
+    // 📤 Gom hàm truyền thông thành 1 dòng Serial đơn nhất, tối ưu băng thông
+    Serial.printf("%ld,%ld\n", current_left, current_right);
+  }
+}

@@ -2,60 +2,68 @@
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Twist
-import socket  # Thư viện mạng mặc định của Python
 
-class LaptopToJetbotBridge(Node):
+class JetbotMotorNode(Node):
     def __init__(self):
-        super().__init__('hardware_node')
+        super().__init__('jetbot_motor_node')
         
-        # 1. Đăng ký Subscriber lắng nghe topic bàn phím ngay trên Laptop
+        # 1. Đăng ký Subscriber lắng nghe topic /cmd_vel từ Laptop bay sang qua Wi-Fi
         self.subscription = self.create_subscription(
             Twist, '/cmd_vel', self.cmd_vel_callback, 10
         )
         
-        # 2. CẤU HÌNH ĐỊA CHỈ IP CỦA JETBOT
-        # ===> ÔNG ĐIỀN CHÍNH XÁC ĐỊA CHỈ IP CỦA XE VÀO ĐÂY <===
-        self.JETBOT_IP = "192.168.1.121"  
-        self.UDP_PORT = 5005
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        
-        # 3. Các thông số hình học xe để làm toán động học nghịch
+        # 2. Các thông số hình học xe của ông
         self.wheel_radius = 0.0325      
         self.wheel_separation = 0.135   
         self.max_motor_speed = 10.0
         
-        self.get_logger().info(f'HRI_WS: Sẵn sàng bắn lệnh mạng sang JetBot tại IP: {self.JETBOT_IP}')
+        # 3. KHỞI TẠO PHẦN CỨNG ĐỘNG CƠ Ở ĐÂY
+        # (Ví dụ: Khởi tạo thư viện PCA9685, Adafruit Motor Kit, hoặc chân GPIO...)
+        self.get_logger().info('ROS 2 Jetbot: Đã thông mạng, đang lắng nghe /cmd_vel từ Laptop...')
+
+    def execute_motor_command(self, left_speed, right_speed):
+        """
+        HÀM NÀY ĐỂ ÔNG ĐIỀN CODE ĐIỀU KHIỂN PHẦN CỨNG THẬT
+        left_speed và right_speed có giá trị từ -1.0 đến 1.0
+        """
+        # [Ông điền bùa chú điều khiển mạch cầu H hoặc I2C vào đây nhe]
+        # Ví dụ nháp:
+        # self.motor_left.set_speed(left_speed)
+        # self.motor_right.set_speed(right_speed)
+        
+        self.get_logger().info(f'Đang chạy bánh -> Trái: {left_speed:.2f}, Phải: {right_speed:.2f}')
 
     def cmd_vel_callback(self, msg):
-        v = msg.linear.x * 0.5   # Vận tốc tiến lùi (m/s)
-        w = msg.angular.z * 2 # Vận tốc xoay tròn (rad/s)
+        # Lấy vận tốc tuyến tính và vận tốc góc từ topic /cmd_vel
+        v = msg.linear.x * 0.5   
+        w = msg.angular.z * 2.0 
 
-        # Làm toán động học nghịch vi sai ngay trên Laptop cho nhẹ não xe
+        # Toán động học nghịch hệ vi sai bằng LaTeX cho ông dễ nhìn:
+        # $v_{left} = v - \frac{w \cdot L}{2}$
+        # $v_{right} = v + \frac{w \cdot L}{2}$
         v_left = v - (w * self.wheel_separation / 2.0)
         v_right = v + (w * self.wheel_separation / 2.0)
 
         w_left = v_left / self.wheel_radius
         w_right = v_right / self.wheel_radius
 
+        # Ép dải tốc độ chuẩn về [-1.0, 1.0]
         left_cmd = max(min(w_left / self.max_motor_speed, 1.0), -1.0)
         right_cmd = max(min(w_right / self.max_motor_speed, 1.0), -1.0)
 
-        # Gói 2 con số tốc độ thành chuỗi chữ "trái,phải" rồi ném xuyên không khí qua Wi-Fi
-        message = f"{left_cmd},{right_cmd}"
-        self.sock.sendto(message.encode('utf-8'), (self.JETBOT_IP, self.UDP_PORT))
-        
-        self.get_logger().info(f'Bắn lệnh UDP -> Trái: {left_cmd:.2f}, Phải: {right_cmd:.2f}')
+        # Gọi hàm điều khiển phần cứng thực tế
+        self.execute_motor_command(left_cmd, right_cmd)
 
 def main(args=None):
     rclpy.init(args=args)
-    node = LaptopToJetbotBridge()
+    node = JetbotMotorNode()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
         pass
     finally:
-        # Nếu ông tắt node trên Laptop (Ctrl+C), tự động bắn gói "0,0" sang từ xa để xe dừng ngay lập tức
-        node.sock.sendto("0.0,0.0".encode('utf-8'), (node.JETBOT_IP, node.UDP_PORT))
+        # Khi ngắt node (Ctrl+C), cho xe dừng khẩn cấp tránh đâm tường
+        node.execute_motor_command(0.0, 0.0)
         node.destroy_node()
         rclpy.shutdown()
 
